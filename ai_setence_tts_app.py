@@ -1,8 +1,8 @@
 # ===========================================================
 # WHISPEECH — Silent Lip to Intent → Sentence → TTS Pipeline
-# 최종 안정판 (멀티프레임 FaceMesh + bytes input + Gradio 3.50.2 호환)
+# 최종 안정판 (멀티프레임 FaceMesh + Gradio 3.50.2 대응)
 # ===========================================================
-
+print("=== SCRIPT STARTED ===")
 import os
 import uuid
 import cv2
@@ -13,6 +13,7 @@ import mediapipe as mp
 from gtts import gTTS
 from dotenv import load_dotenv
 import shutil
+import base64  # ✅ 추가
 
 # -----------------------------------------------------------
 # Gemini
@@ -220,44 +221,86 @@ def generate_tts(text):
 # -----------------------------------------------------------
 # 7) 전체 파이프라인
 # -----------------------------------------------------------
-def full_pipeline(video_path):
-    print("=== STEP 1: received path ===", video_path)
+def full_pipeline(video_input):
+    print("\n========== FULL PIPELINE CALLED ==========")
+    print("RAW INPUT TYPE:", type(video_input))
+    print("RAW INPUT VALUE:", video_input)
 
-    safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
-    shutil.copy(video_path, safe_path)
-    print("=== STEP 2: copied to ===", safe_path)
+    try:
+        # 1) 업로드된 비디오를 안전한 파일로 저장
+        os.makedirs("uploaded_videos", exist_ok=True)
 
-    cropped_path = f"tmp_video/{uuid.uuid4().hex}.mp4"
-    print("=== STEP 3: start preprocess ===")
+        if isinstance(video_input, dict):
+            # Gradio 3.50.2: {'name': ..., 'data': 'data:video/mp4;base64,....'}
+            data = video_input.get("data")
+            if not data:
+                return "비디오 데이터가 비어 있습니다.", "", ""
 
-    frames = preprocess_video(safe_path, cropped_path)
+            # "data:video/mp4;base64,xxxx" → "xxxx"만 떼기
+            if "," in data:
+                b64 = data.split(",", 1)[1]
+            else:
+                b64 = data
 
-    if frames is None:
-        print("=== ERROR: preprocess failed ===")
-        return {"error": "입 인식 실패"}, "", None
+            video_bytes = base64.b64decode(b64)
+            safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
+            with open(safe_path, "wb") as f:
+                f.write(video_bytes)
 
-    print("=== STEP 4: frames extracted ===", len(frames))
+        elif isinstance(video_input, str):
+            # 일부 환경에서는 파일 경로(str)로 들어옴
+            safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
+            shutil.copy(video_input, safe_path)
+        else:
+            return f"지원하지 않는 입력 타입입니다: {type(video_input)}", "", ""
 
-    npy_path = frames_to_npy(frames)
-    print("=== STEP 5: npy saved ===", npy_path)
+        print("=== STEP 1: saved to ===", safe_path)
 
-    intents = predict_intents(
-        model=intent_model,
-        npy_path=npy_path,
-        canonical_keywords=CANONICAL_KEYWORDS,
-        device=DEVICE,
-        top_k=3,
-        threshold=0.3
-    )
-    print("=== STEP 6: intents ===", intents)
+        # 2) crop
+        os.makedirs("tmp_video", exist_ok=True)
+        cropped_path = f"tmp_video/{uuid.uuid4().hex}.mp4"
+        print("=== STEP 2: start preprocess ===")
 
-    sentence = generate_sentence_from_intents(intents)
-    print("=== STEP 7: sentence ===", sentence)
+        frames = preprocess_video(safe_path, cropped_path)
 
-    audio = generate_tts(sentence)
-    print("=== STEP 8: tts saved ===", audio)
+        if frames is None:
+            print("=== ERROR: preprocess failed ===")
+            return "입 인식 실패 (Mediapipe에서 얼굴/입을 못 찾았습니다.)", "", ""
 
-    return intents, sentence, audio
+        print("=== STEP 3: frames extracted ===", len(frames))
+
+        # 3) npy
+        npy_path = frames_to_npy(frames)
+        print("=== STEP 4: npy saved ===", npy_path)
+
+        # 4) Intent
+        intents = predict_intents(
+            model=intent_model,
+            npy_path=npy_path,
+            canonical_keywords=CANONICAL_KEYWORDS,
+            device=DEVICE,
+            top_k=3,
+            threshold=0.3
+        )
+        print("=== STEP 5: intents ===", intents)
+
+        # 5) Sentence
+        sentence = generate_sentence_from_intents(intents)
+        print("=== STEP 6: sentence ===", sentence)
+
+        # 6) Audio
+        audio = generate_tts(sentence)
+        print("=== STEP 7: tts saved ===", audio)
+
+        # 지금은 Textbox 3개라 경로도 문자열로 그대로 반환
+        return str(intents), sentence, audio
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # 에러 내용을 첫 번째 Textbox에 보여주자
+        return f"에러 발생: {e}", "", ""
+
 
 # -----------------------------------------------------------
 # 8) Gradio (3.50.2 버전 기준)
@@ -269,9 +312,10 @@ with gr.Blocks() as demo:
 
     btn = gr.Button("복원하기")
 
-    out_intents = gr.JSON(label="예측된 의도")
+    # 일단 전부 Textbox로 두고, 동작 확인 후 JSON/Audio로 바꾸는 게 안전
+    out_intents = gr.Textbox(label="예측된 의도 (raw)")
     out_sentence = gr.Textbox(label="복원된 문장")
-    out_audio = gr.Audio(label="생성된 음성", type="filepath")
+    out_audio = gr.Textbox(label="TTS 파일 경로")
 
     btn.click(
         fn=full_pipeline,
