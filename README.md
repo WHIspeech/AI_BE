@@ -21,21 +21,21 @@ WHISPEECH는 묵음 상태의 입모양(영상)만으로 사용자의 실제 발
 
 ## 🎥 System Architecture(시스템 아키텍쳐)
  Video Upload
-        ↓
+        
 [Preprocessing Service]
 - Frame extraction  
 - FaceMesh landmark detection  
 - Mouth ROI crop  
 - NPY 변환
-        ↓
+        
 [Intent Model Service]
 - TinyLipIntent (3D CNN + Transformer)
 - Multi-label classification
-        ↓
+        
 [Sentence Generator]
 - Gemini 1.5 Flash
 - Intent → One polite sentence
-        ↓
+        
 [TTS Service]
 - gTTS
 - MP3 생성
