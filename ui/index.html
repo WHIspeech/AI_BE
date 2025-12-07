@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Whispeech</title>
+
+  <style>
+    :root {
+      --blue: #3575ff;
+      --blue-deep: #2453c7;
+      --text-main: #111827;
+      --text-sub: #4b5563;
+      --border-soft: #e5e7eb;
+      --card-bg: rgba(255, 255, 255, 0.88);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text-main);
+      display: flex;
+      justify-content: center;
+      padding: 40px 16px;
+      background: #eef2ff;
+      position: relative;
+      overflow: hidden;
+      font-size: 16px; /* 전체 글씨 살짝 키움 */
+    }
+
+    /* 배경 효과 */
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      border-radius: 999px;
+      filter: blur(70px);
+      opacity: 0.72;
+      z-index: -1;
+    }
+    body::before {
+      width: 460px; height: 460px;
+      background: radial-gradient(circle, #6ea8ff 0%, #eef2ff 70%);
+      top: -140px; left: -80px;
+    }
+    body::after {
+      width: 560px; height: 560px;
+      background: radial-gradient(circle, #ffb18a 0%, #6ea8ff 35%, #eef2ff 75%);
+      bottom: -220px; right: -120px;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 1000px;
+      background: rgba(255, 255, 255, 0.86);
+      border-radius: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+      backdrop-filter: blur(22px);
+      padding: 28px 30px 34px;
+    }
+
+    header {
+      margin-bottom: 26px;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 16px;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: flex-end;
+      font-size: 14px;
+      color: #6b7280;
+      gap: 32px;
+      margin-bottom: 14px;
+    }
+
+    .title-block { max-width: 100%; }
+
+    .logo-line {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+    .logo-line span.blue { color: var(--blue); }
+
+    .subtitle-small {
+      margin-top: 8px;
+      font-size: 15px;
+      color: var(--text-sub);
+    }
+
+    .layout {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* 패널 */
+    .panel {
+      background: var(--card-bg);
+      border-radius: 18px;
+      border: 1px solid var(--border-soft);
+      padding: 22px 20px 26px;
+    }
+
+    .panel h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .panel p {
+      font-size: 15px;
+      margin-bottom: 16px;
+      color: var(--text-sub);
+    }
+
+    /* 사용 설명 텍스트 */
+    .instruction {
+      font-size: 14px;
+      background: #eef2ff;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #dbe1f1;
+      margin-bottom: 22px;
+      color: #3b4252;
+      line-height: 1.5;
+    }
+
+    /* 업로드 박스 */
+    .upload-box {
+      border-radius: 14px;
+      border: 1px dashed #cbd5e1;
+      background: #ffffff;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    input[type="file"] {
+      font-size: 15px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      width: 100%;
+    }
+
+    .status {
+      font-size: 14px;
+      color: #6b7280;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    button {
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: none;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: 0.08s ease;
+    }
+
+    .primary {
+      background: var(--blue);
+      color: #ffffff;
+    }
+    .primary:hover:not(:disabled) {
+      background: var(--blue-deep);
+    }
+
+    .secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .pill {
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      background: #eef2ff;
+      color: #374151;
+      border: 1px solid #cbd5e1;
+    }
+
+    .result-box {
+      background: #ffffff;
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      padding: 16px 14px;
+      min-height: 110px;
+      font-size: 15px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      color: #111827;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="shell">
+    <header>
+      <div class="header-top">
+        <div>Deep learning</div>
+        <div>Project.</div>
+        <div>2025</div>
+      </div>
+
+      <div class="title-block">
+        <div class="logo-line">WHI<span class="blue">SPEECH</span></div>
+        <div class="subtitle-small">말을 잃은 사람들의 ‘속삭임’을 다시 ‘말’로 되돌려주는 AI</div>
+      </div>
+    </header>
+
+    <main class="layout">
+
+      <!-- 🟦 Web 사용 방법 안내 -->
+      <div class="instruction">
+        Whispeech는 입 모양 영상 또는 묵음 발화 오디오를 입력받아 문장을 복원하는 데모입니다.<br>
+        아래에서 파일을 업로드한 뒤 “분석하기” 버튼을 누르면 예측된 문장이 출력됩니다.
+      </div>
+
+      <!-- 파일 업로드 -->
+      <section class="panel">
+        <h2>파일 업로드</h2>
+        <p>입 모양 영상 또는 묵음 발화 오디오 파일을 업로드하세요.</p>
+
+        <div class="upload-box">
+          <input type="file" id="fileInput" accept="video/*,audio/*">
+          <div class="status" id="fileStatus">선택된 파일 없음</div>
+
+          <div class="btn-row">
+            <button id="analyzeBtn" class="primary" disabled>분석하기</button>
+            <button id="resetBtn" class="secondary">초기화</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 예측 결과 -->
+      <section class="panel">
+        <h2>예측 결과</h2>
+        <p>모델이 복원한 문장과 의도·키워드 결과가 아래에 표시됩니다.</p>
+
+        <div class="pill-row">
+          <div class="pill">예측 문장</div>
+          <div class="pill">의도</div>
+          <div class="pill">키워드</div>
+        </div>
+
+        <div class="result-box" id="resultBox">
+          파일 업로드 후 “분석하기” 버튼을 눌러 결과를 확인하세요.
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const fileStatus = document.getElementById("fileStatus");
+    const analyzeBtn = document.getElementById("analyzeBtn");
+    const resultBox = document.getElementById("resultBox");
+    const resetBtn = document.getElementById("resetBtn");
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) {
+        fileStatus.textContent = "선택된 파일 없음";
+        analyzeBtn.disabled = true;
+        return;
+      }
+      fileStatus.textContent = `파일: ${file.name}`;
+      analyzeBtn.disabled = false;
+    });
+
+    analyzeBtn.addEventListener("click", () => {
+      resultBox.textContent =
+        "예시 결과입니다.\n" +
+        "API 연동 후 실제 모델이 복원한 문장이 이 영역에 표시됩니다.";
+    });
+
+    resetBtn.addEventListener("click", () => {
+      fileInput.value = "";
+      fileStatus.textContent = "선택된 파일 없음";
+      resultBox.textContent = "파일 업로드 후 “분석하기” 버튼을 눌러 결과를 확인하세요.";
+      analyzeBtn.disabled = true;
+    });
+  </script>
+</body>
+</html>
+
+
+
+
+
+
