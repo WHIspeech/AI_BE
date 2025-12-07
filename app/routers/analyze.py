@@ -2,10 +2,10 @@ from fastapi import APIRouter, UploadFile, File
 import uuid
 import os
 
-from services.preprocessing import preprocess_video, frames_to_npy
-from services.predictor import load_intent_model, predict_intents
-from services.sentence import generate_sentence_from_intents
-from services.tts import generate_tts
+from app.services.preprocessing import preprocess_video, frames_to_npy
+from app.services.predictor import load_intent_model, predict_intents
+from app.services.sentence import generate_sentence_from_intents
+from app.services.tts import generate_tts
 
 router = APIRouter()
 intent_model, keywords, device = load_intent_model()
