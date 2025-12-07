@@ -19,27 +19,29 @@ WHISPEECH는 묵음 상태의 입모양(영상)만으로 사용자의 실제 발
 - 자연스럽고 문맥 있는 문장으로 변환
 - 규칙 기반 프롬프트 설계로 정보 왜곡 최소화
 
+## 🎥 System Architecture(시스템 아키텍쳐)
+ Video Upload
+        ↓
+[Preprocessing Service]
+- Frame extraction  
+- FaceMesh landmark detection  
+- Mouth ROI crop  
+- NPY 변환
+        ↓
+[Intent Model Service]
+- TinyLipIntent (3D CNN + Transformer)
+- Multi-label classification
+        ↓
+[Sentence Generator]
+- Gemini 1.5 Flash
+- Intent → One polite sentence
+        ↓
+[TTS Service]
+- gTTS
+- MP3 생성
+        ↓
+💬 최종 반환 (Intent JSON / 문장 / 음성파일)
 
-## 🏗️ Project Architecture
-WHISPEECH/
-│
-├── app/
-│   ├── routers/
-│   │   ├── analyze.py        # 영상 분석 API
-│   │   └── tts.py            # TTS API
-│   ├── services/
-│   │   ├── preprocessing.py  # 영상 전처리 / 프레임 추출
-│   │   ├── predictor.py      # 모델 inference
-│   │   └── sentence.py       # LLM 기반 문장 생성
-│   ├── templates/
-│   │   └── index.html        # 업로드용 웹 UI
-│   └── static/
-│       └── uploads/          # 업로드된 영상 저장
-│
-├── tiny_lip_intent_model.py   # LipNet inference model
-├── requirements.txt
-├── main.py                     # FastAPI entrypoint
-└── README.md
 
 ## 🛠 Tech Stack
 
