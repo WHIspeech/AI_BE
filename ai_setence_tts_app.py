@@ -1,8 +1,8 @@
 # ===========================================================
 # WHISPEECH — Silent Lip to Intent → Sentence → TTS Pipeline
-# 최종 안정판 (멀티프레임 FaceMesh + bytes input)
+# 최종 안정판 (멀티프레임 FaceMesh + bytes input + Gradio 3.50.2 대응)
 # ===========================================================
-
+print("=== SCRIPT STARTED ===")
 import os
 import uuid
 import cv2
@@ -12,6 +12,7 @@ import mediapipe as mp
 from gtts import gTTS
 from dotenv import load_dotenv
 import shutil
+import base64  # ✅ 추가
 
 # -----------------------------------------------------------
 # Gemini
@@ -384,45 +385,84 @@ def generate_tts(text):
 # -----------------------------------------------------------
 # 7) 전체 파이프라인
 # -----------------------------------------------------------
-def full_pipeline(video_path):
-    print("=== STEP 1: received path ===", video_path)
+def full_pipeline(video_input):
+    print("\n========== FULL PIPELINE CALLED ==========")
+    print("RAW INPUT TYPE:", type(video_input))
+    print("RAW INPUT VALUE:", video_input)
 
-    safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
-    shutil.copy(video_path, safe_path)
-    print("=== STEP 2: copied to ===", safe_path)
+    try:
+        # 1) 업로드된 비디오를 안전한 파일로 저장
+        os.makedirs("uploaded_videos", exist_ok=True)
 
-    cropped_path = f"tmp_video/{uuid.uuid4().hex}.mp4"
-    print("=== STEP 3: start preprocess ===")
+        if isinstance(video_input, dict):
+            # Gradio 3.50.2: {'name': ..., 'data': 'data:video/mp4;base64,....'}
+            data = video_input.get("data")
+            if not data:
+                return "비디오 데이터가 비어 있습니다.", "", ""
 
-    frames = preprocess_video(safe_path, cropped_path)
+            # "data:video/mp4;base64,xxxx" → "xxxx"만 떼기
+            if "," in data:
+                b64 = data.split(",", 1)[1]
+            else:
+                b64 = data
 
-    if frames is None:
-        print("=== ERROR: preprocess failed ===")
-        return {"error": "입 인식 실패"}, "", None
+            video_bytes = base64.b64decode(b64)
+            safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
+            with open(safe_path, "wb") as f:
+                f.write(video_bytes)
 
-    print("=== STEP 4: frames extracted ===", len(frames))
+        elif isinstance(video_input, str):
+            # 일부 환경에서는 파일 경로(str)로 들어옴
+            safe_path = f"uploaded_videos/{uuid.uuid4().hex}.mp4"
+            shutil.copy(video_input, safe_path)
+        else:
+            return f"지원하지 않는 입력 타입입니다: {type(video_input)}", "", ""
 
-    npy_path = frames_to_npy(frames)
-    print("=== STEP 5: npy saved ===", npy_path)
+        print("=== STEP 1: saved to ===", safe_path)
 
-    intents = predict_intents(
-        model=intent_model,
-        npy_path=npy_path,
-        canonical_keywords=CANONICAL_KEYWORDS,
-        device=DEVICE,
-        top_k=3,
-        threshold=0.3
-    )
-    print("=== STEP 6: intents ===", intents)
+        # 2) crop
+        os.makedirs("tmp_video", exist_ok=True)
+        cropped_path = f"tmp_video/{uuid.uuid4().hex}.mp4"
+        print("=== STEP 2: start preprocess ===")
 
-    sentences = generate_sentences_from_intents(intents)
-    print("=== STEP 7: sentences ===", sentences)
+        frames = preprocess_video(safe_path, cropped_path)
 
-    # 첫 번째 문장으로 기본 TTS 생성 (선택 기능은 웹에서 처리)
-    default_audio = generate_tts(sentences[0] if sentences else "의도가 검출되지 않았습니다.")
-    print("=== STEP 8: default tts saved ===", default_audio)
+        if frames is None:
+            print("=== ERROR: preprocess failed ===")
+            return "입 인식 실패 (Mediapipe에서 얼굴/입을 못 찾았습니다.)", "", ""
 
-    return intents, sentences, default_audio
+        print("=== STEP 3: frames extracted ===", len(frames))
+
+        # 3) npy
+        npy_path = frames_to_npy(frames)
+        print("=== STEP 4: npy saved ===", npy_path)
+
+        # 4) Intent
+        intents = predict_intents(
+            model=intent_model,
+            npy_path=npy_path,
+            canonical_keywords=CANONICAL_KEYWORDS,
+            device=DEVICE,
+            top_k=3,
+            threshold=0.3
+        )
+        print("=== STEP 5: intents ===", intents)
+
+        # 5) Sentences (multiple sentences, one per intent)
+        sentences = generate_sentences_from_intents(intents)
+        print("=== STEP 6: sentences ===", sentences)
+
+        # 6) Audio (first sentence as default)
+        default_audio = generate_tts(sentences[0] if sentences else "의도가 검출되지 않았습니다.")
+        print("=== STEP 7: default tts saved ===", default_audio)
+
+        return intents, sentences, default_audio
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # 에러 내용을 첫 번째 반환값에 보여주자
+        return f"에러 발생: {e}", "", ""
 
 # -----------------------------------------------------------
 # 참고: 이 파일은 파이프라인 함수들을 제공합니다.
