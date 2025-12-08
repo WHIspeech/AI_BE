@@ -321,6 +321,10 @@ def generate_spoken_sentence_candidates(intent_list):
             "models/gemini-2.0-flash",
             "models/gemini-2.5-pro",
             "models/gemini-pro-latest",
+            "gemini-2.0-flash",
+            "gemini-2.0-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
         ]
 
         for model_name in models_to_try:
