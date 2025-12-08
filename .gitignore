@@ -4,3 +4,21 @@
 venv/
 ENV/
 env/
+
+# 임시 파일 및 폴더
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 업로드된 파일 및 생성된 파일
+tmp_npy/
+tmp_video/
+tts_outputs/
+uploaded_videos/
+*.mp3
+*.mp4
+
+# 테스트 파일 (선택사항)
+# test_*.py

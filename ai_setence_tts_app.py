@@ -1,6 +1,6 @@
 # ===========================================================
 # WHISPEECH — Silent Lip to Intent → Sentence → TTS Pipeline
-# 최종 안정판 (멀티프레임 FaceMesh + bytes input + Gradio 3.50.2 호환)
+# 최종 안정판 (멀티프레임 FaceMesh + bytes input)
 # ===========================================================
 
 import os
@@ -8,7 +8,6 @@ import uuid
 import cv2
 import numpy as np
 import torch
-import gradio as gr
 import mediapipe as mp
 from gtts import gTTS
 from dotenv import load_dotenv
@@ -28,9 +27,22 @@ genai.configure(api_key=GOOGLE_API_KEY)
 # -----------------------------------------------------------
 from tiny_lip_intent_model import (
     TinyLipIntentNet,
-    predict_intents
+    predict_intents as predict_intents_from_arr
 )
 from intent_keyword_config import CANONICAL_KEYWORDS, TRIGGER_MAP
+
+# npy_path를 받는 predict_intents 래퍼 함수
+def predict_intents(model, npy_path, canonical_keywords, top_k=3, threshold=0.3, device="cpu"):
+    """npy_path를 받아서 배열로 변환 후 predict_intents 호출"""
+    arr = np.load(npy_path)
+    
+    # 데이터 타입 확인 및 변환 (uint8 → float32)
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+    
+    return predict_intents_from_arr(model, arr, canonical_keywords, top_k, threshold, device)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -60,13 +72,28 @@ def find_best_mouth_frame(cap, total_frames):
     check_positions = [0.05, 0.25, 0.5, 0.75, 0.95]
     check_frames = [int(total_frames * p) for p in check_positions]
 
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
-    ) as face_mesh:
+    # MediaPipe 초기화 (오류 발생 시 최소 옵션으로 재시도)
+    try:
+        face_mesh = mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+    except Exception as e:
+        print(f"[WARNING] FaceMesh 초기화 실패, 최소 옵션으로 재시도: {e}")
+        try:
+            face_mesh = mp_face_mesh.FaceMesh(
+                static_image_mode=True,
+                max_num_faces=1,
+                min_detection_confidence=0.5
+            )
+        except Exception as e2:
+            print(f"[ERROR] FaceMesh 초기화 완전 실패: {e2}")
+            return None
 
+    try:
         for idx in check_frames:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ret, frame = cap.read()
@@ -77,7 +104,13 @@ def find_best_mouth_frame(cap, total_frames):
             results = face_mesh.process(rgb)
 
             if results.multi_face_landmarks:
+                face_mesh.close()
                 return frame
+    finally:
+        try:
+            face_mesh.close()
+        except:
+            pass
 
     return None
 
@@ -133,14 +166,33 @@ def preprocess_video(in_path, out_path):
         return None
 
     # detect mouth box
-    with mp_face_mesh.FaceMesh(
-        static_image_mode=True,
-        max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
-    ) as face_mesh:
+    try:
+        face_mesh = mp_face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            refine_landmarks=False,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+    except Exception as e:
+        print(f"[WARNING] FaceMesh 초기화 실패, 최소 옵션으로 재시도: {e}")
+        try:
+            face_mesh = mp_face_mesh.FaceMesh(
+                static_image_mode=True,
+                max_num_faces=1,
+                min_detection_confidence=0.5
+            )
+        except Exception as e2:
+            print(f"[ERROR] FaceMesh 초기화 완전 실패: {e2}")
+            return None
 
+    try:
         box = get_mouth_box(best_frame, face_mesh)
+    finally:
+        try:
+            face_mesh.close()
+        except:
+            pass
         if box is None:
             print("[FAIL] Mouth box not detected")
             return None
@@ -175,36 +227,148 @@ def preprocess_video(in_path, out_path):
 def frames_to_npy(frames):
     os.makedirs("tmp_npy", exist_ok=True)
     arr = np.array(frames)
+    
+    # (T, H, W, C) → (C, T, H, W) 변환
+    if len(arr.shape) == 4:  # (T, H, W, C)
+        arr = arr.transpose(3, 0, 1, 2)  # (C, T, H, W)
+    
+    # uint8 → float32 변환 및 정규화 [0, 1]
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+    
     npy_path = f"tmp_npy/{uuid.uuid4().hex}.npy"
     np.save(npy_path, arr)
     return npy_path
 
 
 # -----------------------------------------------------------
-# 5) Intent → 문장 생성
+# 5) Intent → 문장 후보 생성 (3개)
 # -----------------------------------------------------------
-def generate_sentence_from_intents(intent_list):
+def generate_sentences_from_intents(intent_list):
+    """
+    각 의도마다 하나씩 문장을 생성
+    Returns: list of sentences (의도 개수만큼)
+    """
     if not intent_list:
-        return "입모양에서 의도가 검출되지 않았습니다."
+        return ["입모양에서 의도가 검출되지 않았습니다."]
 
-    tags = [x["intent"] for x in intent_list]
+    # 의도 태그를 한글 문장으로 변환하는 매핑
+    intent_to_korean = {
+        "TRAVEL": "여행",
+        "SCHEDULE": "일정",
+        "PLACE_NATURE": "자연 장소",
+        "PLACE_CITY": "도시",
+        "COMPANION": "동행",
+        "FOOD_DRINK": "음식과 음료",
+        "TRANSPORT": "교통",
+        "COST": "비용",
+        "TIME": "시간",
+        "ACTIVITY": "활동",
+        "EMOTION_POS": "긍정적인 감정",
+        "EMOTION_NEG": "부정적인 감정",
+        "WATER": "물",
+        "FOOD_CARE": "음식 케어",
+        "TOILET": "화장실",
+        "PAIN": "통증",
+        "HELP": "도움",
+        "MOVE": "이동"
+    }
 
-    prompt = f"""
+    sentences = []
+    
+    # 각 의도에 대해 하나씩 문장 생성
+    for intent_item in intent_list:
+        intent_tag = intent_item["intent"]
+        intent_korean = intent_to_korean.get(intent_tag, intent_tag)
+        
+        # 개별 의도에 대한 프롬프트
+        prompt = f"""
 입모양 기반 의도 태그를 자연스러운 한 문장 존댓말로 바꿔주세요.
-태그: {tags}
+의도 태그: {intent_tag} ({intent_korean})
 
 규칙:
 1) 새로운 정보 추가 금지
 2) 태그 의미 안에서만 생성
-3) 한 문장
+3) 한 문장으로 자연스럽게 표현
+4) 존댓말 사용
+5) "~에 대해 말씀하시는 것 같습니다" 같은 단순한 패턴보다는 구체적이고 자연스러운 표현 사용
+
+출력: 문장 하나만 출력하세요.
 """
 
-    try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        res = model.generate_content(prompt)
-        return res.text.strip()
-    except Exception as e:
-        return f"문장 생성 실패: {e}"
+        try:
+            # 사용 가능한 최신 모델 시도 (우선순위 순)
+            models_to_try = [
+                "models/gemini-2.5-flash",      # 최신 Flash 모델
+                "models/gemini-flash-latest",   # 최신 Flash (자동 업데이트)
+                "models/gemini-2.0-flash",      # 2.0 Flash
+                "models/gemini-2.5-pro",        # 최신 Pro 모델
+                "models/gemini-pro-latest"      # 최신 Pro (자동 업데이트)
+            ]
+            
+            sentence_generated = False
+            for model_name in models_to_try:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    res = model.generate_content(prompt)
+                    if res and res.text:
+                        sentence = res.text.strip()
+                        # 번호나 불릿 포인트 제거
+                        sentence = sentence.lstrip('0123456789.-•)').strip()
+                        if sentence and len(sentence) > 5:
+                            sentences.append(sentence)
+                            sentence_generated = True
+                            break
+                except Exception as e:
+                    error_str = str(e)
+                    # 할당량 초과 오류가 아니면 다음 모델 시도
+                    if "429" not in error_str and "quota" not in error_str.lower() and "rate-limit" not in error_str.lower():
+                        continue
+                    # 할당량 초과 오류면 fallback 사용
+                    break
+            
+            # Gemini API 실패 시 fallback 사용
+            if not sentence_generated:
+                fallback_sentence = generate_single_fallback_sentence(intent_tag, intent_korean)
+                sentences.append(fallback_sentence)
+                
+        except Exception as e:
+            # 예외 발생 시 fallback 사용
+            fallback_sentence = generate_single_fallback_sentence(intent_tag, intent_korean)
+            sentences.append(fallback_sentence)
+    
+    return sentences if sentences else ["의도에 대한 문장을 생성할 수 없습니다."]
+
+
+def generate_single_fallback_sentence(intent_tag, intent_korean):
+    """
+    단일 의도에 대한 fallback 문장 생성
+    """
+    # 의도별로 더 구체적인 문장 패턴 사용
+    patterns = {
+        "TRAVEL": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "SCHEDULE": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
+        "PLACE_NATURE": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
+        "PLACE_CITY": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "COMPANION": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
+        "FOOD_DRINK": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
+        "TRANSPORT": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "COST": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
+        "TIME": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
+        "ACTIVITY": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "EMOTION_POS": f"{intent_korean}을 표현하시는 것 같습니다.",
+        "EMOTION_NEG": f"{intent_korean}을 표현하시는 것 같습니다.",
+        "WATER": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "FOOD_CARE": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
+        "TOILET": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
+        "PAIN": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
+        "HELP": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
+        "MOVE": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
+    }
+    
+    return patterns.get(intent_tag, f"{intent_korean}에 대해 말씀하시는 것 같습니다.")
 
 
 # -----------------------------------------------------------
@@ -251,33 +415,16 @@ def full_pipeline(video_path):
     )
     print("=== STEP 6: intents ===", intents)
 
-    sentence = generate_sentence_from_intents(intents)
-    print("=== STEP 7: sentence ===", sentence)
+    sentences = generate_sentences_from_intents(intents)
+    print("=== STEP 7: sentences ===", sentences)
 
-    audio = generate_tts(sentence)
-    print("=== STEP 8: tts saved ===", audio)
+    # 첫 번째 문장으로 기본 TTS 생성 (선택 기능은 웹에서 처리)
+    default_audio = generate_tts(sentences[0] if sentences else "의도가 검출되지 않았습니다.")
+    print("=== STEP 8: default tts saved ===", default_audio)
 
-    return intents, sentence, audio
+    return intents, sentences, default_audio
 
 # -----------------------------------------------------------
-# 8) Gradio (3.50.2 버전 기준)
+# 참고: 이 파일은 파이프라인 함수들을 제공합니다.
+# FastAPI 웹 애플리케이션은 app.py를 사용하세요.
 # -----------------------------------------------------------
-with gr.Blocks() as demo:
-    gr.Markdown("## WHISPEECH — 묵음 발화 영상 복원 AI")
-
-    video_in = gr.Video(label="입모양 영상 업로드(.mp4)")
-
-    btn = gr.Button("복원하기")
-
-    out_intents = gr.JSON(label="예측된 의도")
-    out_sentence = gr.Textbox(label="복원된 문장")
-    out_audio = gr.Audio(label="생성된 음성", type="filepath")
-
-    btn.click(
-        fn=full_pipeline,
-        inputs=video_in,
-        outputs=[out_intents, out_sentence, out_audio]
-    )
-
-if __name__ == "__main__":
-    demo.launch()

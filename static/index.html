@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WHISPEECH - 묵음 발화 영상 복원 AI</title>
+    <style>
+        :root {
+            --blue: #3575ff;
+            --blue-deep: #2453c7;
+            --text-main: #111827;
+            --text-sub: #4b5563;
+            --border-soft: #e5e7eb;
+            --card-bg: rgba(255, 255, 255, 0.88);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            padding: 40px 16px;
+            background: #eef2ff;
+            position: relative;
+            overflow-x: hidden;
+            font-size: 16px;
+        }
+
+        /* 배경 효과 */
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            border-radius: 999px;
+            filter: blur(70px);
+            opacity: 0.72;
+            z-index: -1;
+        }
+        body::before {
+            width: 460px; height: 460px;
+            background: radial-gradient(circle, #6ea8ff 0%, #eef2ff 70%);
+            top: -140px; left: -80px;
+        }
+        body::after {
+            width: 560px; height: 560px;
+            background: radial-gradient(circle, #ffb18a 0%, #6ea8ff 35%, #eef2ff 75%);
+            bottom: -220px; right: -120px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1000px;
+            background: rgba(255, 255, 255, 0.86);
+            border-radius: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+            backdrop-filter: blur(22px);
+            padding: 28px 30px 34px;
+        }
+
+        header {
+            margin-bottom: 26px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 16px;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: flex-end;
+            font-size: 14px;
+            color: #6b7280;
+            gap: 32px;
+            margin-bottom: 14px;
+        }
+
+        .title-block {
+            max-width: 100%;
+        }
+
+        h1 {
+            font-size: 34px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            margin-bottom: 8px;
+        }
+
+        h1 .blue {
+            color: var(--blue);
+        }
+
+        .subtitle {
+            font-size: 15px;
+            color: var(--text-sub);
+            margin-bottom: 24px;
+        }
+
+        .panel {
+            background: var(--card-bg);
+            border-radius: 18px;
+            border: 1px solid var(--border-soft);
+            padding: 22px 20px 26px;
+            margin-bottom: 22px;
+        }
+
+        .panel h2 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--text-main);
+        }
+
+        .panel p {
+            font-size: 15px;
+            margin-bottom: 16px;
+            color: var(--text-sub);
+        }
+
+        .upload-area {
+            border-radius: 14px;
+            border: 1px dashed #cbd5e1;
+            background: #ffffff;
+            padding: 18px 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        .upload-area:hover {
+            border-color: var(--blue);
+            background: #f8f9ff;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--blue);
+            background: #eef2ff;
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 14px;
+        }
+
+        .upload-text {
+            font-size: 15px;
+            color: var(--blue);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .upload-hint {
+            color: var(--text-sub);
+            font-size: 14px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-info {
+            margin-top: 16px;
+            padding: 12px 14px;
+            background: #eef2ff;
+            border-radius: 10px;
+            border: 1px solid #dbe1f1;
+            font-size: 14px;
+            color: #3b4252;
+            display: none;
+        }
+
+        .file-info.show {
+            display: block;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .btn {
+            padding: 10px 18px;
+            border-radius: 999px;
+            border: none;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.08s ease;
+            flex: 1;
+        }
+
+        .btn.primary {
+            background: var(--blue);
+            color: #ffffff;
+        }
+
+        .btn.primary:hover:not(:disabled) {
+            background: var(--blue-deep);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--blue);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results {
+            margin-top: 22px;
+            display: none;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .result-section {
+            background: var(--card-bg);
+            border-radius: 18px;
+            border: 1px solid var(--border-soft);
+            padding: 22px 20px 26px;
+            margin-bottom: 22px;
+        }
+
+        .result-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-main);
+        }
+
+        .intents-list {
+            list-style: none;
+        }
+
+        .intent-item {
+            background: #ffffff;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            border: 1px solid var(--border-soft);
+            border-left: 4px solid var(--blue);
+        }
+
+        .intent-name {
+            font-weight: 600;
+            color: var(--text-main);
+            font-size: 15px;
+        }
+
+        .intent-score {
+            color: var(--text-sub);
+            font-size: 13px;
+            margin-top: 5px;
+        }
+
+        .sentence-box {
+            background: #ffffff;
+            padding: 16px 14px;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--text-main);
+            white-space: pre-wrap;
+        }
+
+        .sentences-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .sentence-candidate {
+            background: #ffffff;
+            padding: 16px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--border-soft);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+        }
+
+        .sentence-candidate:hover {
+            background: #eef2ff;
+            border-color: var(--blue);
+            transform: translateX(4px);
+        }
+
+        .sentence-candidate.selected {
+            background: #eef2ff;
+            border-color: var(--blue);
+            border-width: 2px;
+        }
+
+        .sentence-text {
+            flex: 1;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--text-main);
+        }
+
+        .sentence-number {
+            background: var(--blue);
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 13px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+
+        .sentence-candidate.selected .sentence-number {
+            background: var(--blue-deep);
+        }
+
+        .audio-player {
+            width: 100%;
+            margin-top: 16px;
+            border-radius: 10px;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 14px 16px;
+            border-radius: 10px;
+            border: 1px solid #ffcdd2;
+            margin-top: 20px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-top">
+                <div>Deep learning</div>
+                <div>Project.</div>
+                <div>2025</div>
+            </div>
+            <div class="title-block">
+                <h1>WHI<span class="blue">SPEECH</span></h1>
+                <p class="subtitle">말을 잃은 사람들의 '속삭임'을 다시 '말'로 되돌려주는 AI</p>
+            </div>
+        </header>
+
+        <main>
+            <div class="panel">
+                <h2>파일 업로드</h2>
+                <p>입 모양 영상 파일을 업로드하세요.</p>
+
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📹</div>
+                    <div class="upload-text">영상 파일을 드래그하거나 클릭하여 업로드</div>
+                    <div class="upload-hint">MP4 형식의 입모양 영상만 지원합니다</div>
+                    <input type="file" id="fileInput" accept="video/mp4">
+                </div>
+
+                <div class="file-info" id="fileInfo"></div>
+
+                <div class="btn-row">
+                    <button class="btn primary" id="processBtn" disabled>분석하기</button>
+                </div>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 15px; color: var(--text-sub); font-size: 14px;">처리 중입니다. 잠시만 기다려주세요...</p>
+            </div>
+
+            <div class="error" id="error"></div>
+
+            <div class="results" id="results">
+                <div class="result-section">
+                    <div class="result-title">📊 예측된 의도</div>
+                    <ul class="intents-list" id="intentsList"></ul>
+                </div>
+
+                <div class="result-section">
+                    <div class="result-title">💬 복원된 문장 후보</div>
+                    <div class="sentences-container" id="sentencesContainer"></div>
+                </div>
+
+                <div class="result-section">
+                    <div class="result-title">🔊 생성된 음성</div>
+                    <audio controls class="audio-player" id="audioPlayer"></audio>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const processBtn = document.getElementById('processBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        const error = document.getElementById('error');
+        const intentsList = document.getElementById('intentsList');
+        const sentencesContainer = document.getElementById('sentencesContainer');
+        const audioPlayer = document.getElementById('audioPlayer');
+
+        let selectedFile = null;
+        let currentSentences = [];
+        let selectedSentenceIndex = 0;
+
+        // 업로드 영역 클릭
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // 파일 선택
+        fileInput.addEventListener('change', (e) => {
+            handleFile(e.target.files[0]);
+        });
+
+        // 드래그 앤 드롭
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFile(file) {
+            if (!file) return;
+
+            if (!file.name.endsWith('.mp4') && !file.name.endsWith('.MP4')) {
+                showError('MP4 파일만 업로드 가능합니다.');
+                return;
+            }
+
+            selectedFile = file;
+            fileInfo.textContent = `선택된 파일: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            fileInfo.classList.add('show');
+            processBtn.disabled = false;
+            results.classList.remove('show');
+            error.classList.remove('show');
+        }
+
+        // 처리 버튼 클릭
+        processBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            // UI 업데이트
+            processBtn.disabled = true;
+            loading.classList.add('show');
+            results.classList.remove('show');
+            error.classList.remove('show');
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || '처리 중 오류가 발생했습니다.');
+                }
+
+                // 결과 표시
+                displayResults(data);
+
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                loading.classList.remove('show');
+                processBtn.disabled = false;
+            }
+        });
+
+        function displayResults(data) {
+            // 의도 표시
+            intentsList.innerHTML = '';
+            if (data.intents && Array.isArray(data.intents)) {
+                data.intents.forEach(intent => {
+                    const li = document.createElement('li');
+                    li.className = 'intent-item';
+                    li.innerHTML = `
+                        <div class="intent-name">${intent.intent}</div>
+                        <div class="intent-score">신뢰도: ${(intent.score * 100).toFixed(1)}%</div>
+                    `;
+                    intentsList.appendChild(li);
+                });
+            }
+
+            // 문장 후보 표시
+            currentSentences = data.sentences || [];
+            sentencesContainer.innerHTML = '';
+            
+            if (currentSentences.length === 0) {
+                sentencesContainer.innerHTML = '<div class="sentence-box">문장이 생성되지 않았습니다.</div>';
+            } else {
+                currentSentences.forEach((sentence, index) => {
+                    const candidate = document.createElement('div');
+                    candidate.className = 'sentence-candidate' + (index === 0 ? ' selected' : '');
+                    candidate.innerHTML = `
+                        <div class="sentence-number">${index + 1}</div>
+                        <div class="sentence-text">${sentence}</div>
+                    `;
+                    candidate.addEventListener('click', () => selectSentence(index));
+                    sentencesContainer.appendChild(candidate);
+                });
+                selectedSentenceIndex = 0;
+            }
+
+            // 기본 오디오 표시 (첫 번째 문장)
+            if (data.audio_url) {
+                audioPlayer.src = data.audio_url;
+            }
+
+            results.classList.add('show');
+        }
+
+        function selectSentence(index) {
+            // 선택 상태 업데이트
+            const candidates = sentencesContainer.querySelectorAll('.sentence-candidate');
+            candidates.forEach((candidate, i) => {
+                if (i === index) {
+                    candidate.classList.add('selected');
+                } else {
+                    candidate.classList.remove('selected');
+                }
+            });
+            
+            selectedSentenceIndex = index;
+            
+            // 선택한 문장으로 TTS 생성
+            generateTTSForSentence(currentSentences[index]);
+        }
+
+        async function generateTTSForSentence(sentence) {
+            try {
+                loading.classList.add('show');
+                
+                const response = await fetch('/api/generate_tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ sentence: sentence })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'TTS 생성 중 오류가 발생했습니다.');
+                }
+
+                // 오디오 업데이트
+                if (data.audio_url) {
+                    audioPlayer.src = data.audio_url;
+                    audioPlayer.load(); // 새 오디오 로드
+                }
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                loading.classList.remove('show');
+            }
+        }
+
+        function showError(message) {
+            error.textContent = `오류: ${message}`;
+            error.classList.add('show');
+        }
+    </script>
+</body>
+</html>
+

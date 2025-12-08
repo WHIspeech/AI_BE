@@ -114,8 +114,9 @@ def video_to_npy(video_path, target_T=40, size=(112,112)):
     with mp_face_mesh.FaceMesh(
         static_image_mode=True,
         max_num_faces=1,
-        refine_landmarks=True,
-        min_detection_confidence=0.5
+        refine_landmarks=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
     ) as face_mesh:
 
         mid_frame = None
@@ -183,7 +184,13 @@ def predict_intents(model, arr, canonical_keywords, top_k=3, threshold=0.3, devi
     """
     arr : (C,T,H,W) numpy array
     """
-    x = torch.from_numpy(arr.copy()).unsqueeze(0).to(device)  # (1,C,T,H,W)
+    # 데이터 타입 확인 및 변환
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32)
+        if arr.max() > 1.0:
+            arr = arr / 255.0
+    
+    x = torch.from_numpy(arr.copy()).float().unsqueeze(0).to(device)  # (1,C,T,H,W)
 
     logits = model(x)
     probs = torch.sigmoid(logits)[0].cpu().numpy()  # (num_intents,)
