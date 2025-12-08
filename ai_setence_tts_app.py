@@ -247,15 +247,17 @@ def frames_to_npy(frames):
 # -----------------------------------------------------------
 # 5) Intent → 문장 후보 생성 (3개)
 # -----------------------------------------------------------
-def generate_sentences_from_intents(intent_list):
+def generate_spoken_sentence_candidates(intent_list):
     """
-    각 의도마다 하나씩 문장을 생성
-    Returns: list of sentences (의도 개수만큼)
+    의도 태그들을 조합하여
+    '실제로 영상 속 사람이 말했을 법한 자연스러운 문장 후보 3개'
+    를 생성하는 함수.
     """
-    if not intent_list:
-        return ["입모양에서 의도가 검출되지 않았습니다."]
 
-    # 의도 태그를 한글 문장으로 변환하는 매핑
+    if not intent_list:
+        return ["입모양에서 의미 있는 문장을 복원할 수 없습니다."]
+
+    # intent → 한글 변환
     intent_to_korean = {
         "TRAVEL": "여행",
         "SCHEDULE": "일정",
@@ -267,8 +269,8 @@ def generate_sentences_from_intents(intent_list):
         "COST": "비용",
         "TIME": "시간",
         "ACTIVITY": "활동",
-        "EMOTION_POS": "긍정적인 감정",
-        "EMOTION_NEG": "부정적인 감정",
+        "EMOTION_POS": "긍정적 감정",
+        "EMOTION_NEG": "부정적 감정",
         "WATER": "물",
         "FOOD_CARE": "음식 케어",
         "TOILET": "화장실",
@@ -277,99 +279,79 @@ def generate_sentences_from_intents(intent_list):
         "MOVE": "이동"
     }
 
-    sentences = []
-    
-    # 각 의도에 대해 하나씩 문장 생성
-    for intent_item in intent_list:
-        intent_tag = intent_item["intent"]
-        intent_korean = intent_to_korean.get(intent_tag, intent_tag)
-        
-        # 개별 의도에 대한 프롬프트
-        prompt = f"""
-입모양 기반 의도 태그를 자연스러운 한 문장 존댓말로 바꿔주세요.
-의도 태그: {intent_tag} ({intent_korean})
+    tags = [item["intent"] for item in intent_list]
+    kor_tags = [intent_to_korean.get(t, t) for t in tags]
+
+    tags_str = ", ".join(tags)
+    kor_str = ", ".join(kor_tags)
+
+    prompt = f"""
+당신은 '입모양 기반 문장 복원 전문가'입니다.
+
+아래 의도 태그들을 기반으로,
+실제로 사람이 말했을 법한 자연스러운 한국어 문장 후보 3개를 생성하세요.
+
+의도 태그: {tags_str}
+의도 의미(한글): {kor_str}
 
 규칙:
-1) 새로운 정보 추가 금지
-2) 태그 의미 안에서만 생성
-3) 한 문장으로 자연스럽게 표현
-4) 존댓말 사용
-5) "~에 대해 말씀하시는 것 같습니다" 같은 단순한 패턴보다는 구체적이고 자연스러운 표현 사용
+1) 태그 의미 범위 안에서만 문장 생성 (새 정보 추가 금지)
+2) 매우 자연스럽고 현실적인 문장
+3) 존댓말 한 문장
+4) 불릿포인트·번호·인용금지
+5) 세 문장을 줄바꿈으로만 구분
+6) “~말씀하시는 것 같습니다” 같은 패턴 금지 → 실제 발화 형태
 
-출력: 문장 하나만 출력하세요.
+예시:
+- TRAVEL + TIME → “언제 여행 갈 수 있을까요?”
+- WATER → “혹시 물 좀 주실 수 있나요?”
+- TOILET + HELP → “화장실이 어딘지 도와주실 수 있을까요?”
+
+출력 예:
+문장1
+문장2
+문장3
 """
 
-        try:
-            # 사용 가능한 최신 모델 시도 (우선순위 순)
-            models_to_try = [
-                "models/gemini-2.5-flash",      # 최신 Flash 모델
-                "models/gemini-flash-latest",   # 최신 Flash (자동 업데이트)
-                "models/gemini-2.0-flash",      # 2.0 Flash
-                "models/gemini-2.5-pro",        # 최신 Pro 모델
-                "models/gemini-pro-latest"      # 최신 Pro (자동 업데이트)
-            ]
-            
-            sentence_generated = False
-            for model_name in models_to_try:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    res = model.generate_content(prompt)
-                    if res and res.text:
-                        sentence = res.text.strip()
-                        # 번호나 불릿 포인트 제거
-                        sentence = sentence.lstrip('0123456789.-•)').strip()
-                        if sentence and len(sentence) > 5:
-                            sentences.append(sentence)
-                            sentence_generated = True
-                            break
-                except Exception as e:
-                    error_str = str(e)
-                    # 할당량 초과 오류가 아니면 다음 모델 시도
-                    if "429" not in error_str and "quota" not in error_str.lower() and "rate-limit" not in error_str.lower():
-                        continue
-                    # 할당량 초과 오류면 fallback 사용
+    try:
+        # 모델 우선순위
+        models_to_try = [
+            "models/gemini-2.5-flash",
+            "models/gemini-flash-latest",
+            "models/gemini-2.0-flash",
+            "models/gemini-2.5-pro",
+            "models/gemini-pro-latest",
+        ]
+
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                res = model.generate_content(prompt)
+                if res and res.text:
+                    text = res.text.strip()
+                    # bullet/번호 제거
+                    lines = [
+                        l.lstrip("0123456789.-•)").strip()
+                        for l in text.split("\n")
+                        if len(l.strip()) > 3
+                    ]
+                    # 최대 3개만 반환
+                    return lines[:3]
+            except Exception as e:
+                if "429" in str(e) or "quota" in str(e).lower():
                     break
-            
-            # Gemini API 실패 시 fallback 사용
-            if not sentence_generated:
-                fallback_sentence = generate_single_fallback_sentence(intent_tag, intent_korean)
-                sentences.append(fallback_sentence)
-                
-        except Exception as e:
-            # 예외 발생 시 fallback 사용
-            fallback_sentence = generate_single_fallback_sentence(intent_tag, intent_korean)
-            sentences.append(fallback_sentence)
-    
-    return sentences if sentences else ["의도에 대한 문장을 생성할 수 없습니다."]
+                continue
 
+    except Exception:
+        pass
 
-def generate_single_fallback_sentence(intent_tag, intent_korean):
-    """
-    단일 의도에 대한 fallback 문장 생성
-    """
-    # 의도별로 더 구체적인 문장 패턴 사용
-    patterns = {
-        "TRAVEL": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "SCHEDULE": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
-        "PLACE_NATURE": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
-        "PLACE_CITY": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "COMPANION": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
-        "FOOD_DRINK": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
-        "TRANSPORT": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "COST": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
-        "TIME": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
-        "ACTIVITY": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "EMOTION_POS": f"{intent_korean}을 표현하시는 것 같습니다.",
-        "EMOTION_NEG": f"{intent_korean}을 표현하시는 것 같습니다.",
-        "WATER": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "FOOD_CARE": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
-        "TOILET": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
-        "PAIN": f"{intent_korean}에 대해 말씀하시는 것 같습니다.",
-        "HELP": f"{intent_korean}에 관해 이야기하시는 것 같습니다.",
-        "MOVE": f"{intent_korean}에 대한 내용을 말씀하시는 것 같습니다.",
-    }
-    
-    return patterns.get(intent_tag, f"{intent_korean}에 대해 말씀하시는 것 같습니다.")
+    # fallback
+    return [
+        f"{kor_str}에 대해 말하시는 듯합니다.",
+        f"{kor_str} 관련해 여쭤보시는 것 같습니다.",
+        f"{kor_str}에 대한 궁금한 점이 있으신가요?"
+    ]
+
 
 
 # -----------------------------------------------------------
@@ -449,7 +431,7 @@ def full_pipeline(video_input):
         print("=== STEP 5: intents ===", intents)
 
         # 5) Sentences (multiple sentences, one per intent)
-        sentences = generate_sentences_from_intents(intents)
+        sentences = generate_spoken_sentence_candidates(intents)
         print("=== STEP 6: sentences ===", sentences)
 
         # 6) Audio (first sentence as default)
